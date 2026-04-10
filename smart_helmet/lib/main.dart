@@ -2,14 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'secrets.dart';
+import 'screens/dashboard_page.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  await Supabase.initialize(
-    url: supabaseUrl,
-    anonKey: supabaseAnonKey,
-  );
+  await Supabase.initialize(url: supabaseUrl, anonKey: supabaseAnonKey);
 
   runApp(const MyApp());
 }
@@ -21,7 +19,7 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'Smart Helmet',
+      title: 'Smart Helmet Dashboard',
       theme: ThemeData(useMaterial3: true),
       home: const AuthGate(),
     );
@@ -75,14 +73,19 @@ class _AuthPageState extends State<AuthPage> {
         );
         setState(() => _isSignUp = false);
       } else {
-        await supabase.auth.signInWithPassword(email: email, password: password);
+        await supabase.auth.signInWithPassword(
+          email: email,
+          password: password,
+        );
       }
     } on AuthException catch (e) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(e.message)));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(e.message)));
     } catch (_) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Unexpected error')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Unexpected error')));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -119,9 +122,11 @@ class _AuthPageState extends State<AuthPage> {
               width: double.infinity,
               child: FilledButton(
                 onPressed: _loading ? null : _submit,
-                child: Text(_loading
-                    ? 'Please wait...'
-                    : (_isSignUp ? 'Create account' : 'Login')),
+                child: Text(
+                  _loading
+                      ? 'Please wait...'
+                      : (_isSignUp ? 'Create account' : 'Login'),
+                ),
               ),
             ),
             const SizedBox(height: 10),
@@ -129,9 +134,11 @@ class _AuthPageState extends State<AuthPage> {
               onPressed: _loading
                   ? null
                   : () => setState(() => _isSignUp = !_isSignUp),
-              child: Text(_isSignUp
-                  ? 'Already have an account? Login'
-                  : 'No account? Sign up'),
+              child: Text(
+                _isSignUp
+                    ? 'Already have an account? Login'
+                    : 'No account? Sign up',
+              ),
             ),
           ],
         ),
@@ -146,19 +153,18 @@ class HomePage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final supabase = Supabase.instance.client;
-    final email = supabase.auth.currentUser?.email ?? 'Unknown';
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Home'),
+        title: const Text('Smart Helmet Dashboard'),
         actions: [
           IconButton(
             icon: const Icon(Icons.logout),
             onPressed: () async => supabase.auth.signOut(),
-          )
+          ),
         ],
       ),
-      body: Center(child: Text('Logged in as $email')),
+      body: const DashboardPage(),
     );
   }
 }
