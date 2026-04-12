@@ -3,11 +3,16 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bluetooth_classic_serial/flutter_bluetooth_classic.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/helmet_data.dart';
 import '../services/bluetooth_service.dart';
-
-import 'package:supabase_flutter/supabase_flutter.dart';
+import '../widgets/connection_card.dart';
+import '../widgets/ride_session_card.dart';
+import '../widgets/status_card.dart';
+import '../widgets/metric_card.dart';
+import '../widgets/section_title.dart';
 
 class DashboardPage extends StatefulWidget {
   const DashboardPage({super.key});
@@ -22,6 +27,7 @@ class _DashboardPageState extends State<DashboardPage> {
   List<BluetoothDevice> _pairedDevices = [];
   String? _selectedDeviceAddress;
   StreamSubscription<String>? _dataSubscription;
+  StreamSubscription<Position>? _positionSubscription;
 
   bool _isLoadingDevices = false;
   bool _isConnecting = false;
@@ -30,6 +36,14 @@ class _DashboardPageState extends State<DashboardPage> {
   String _status = 'Not connected';
   String _lastRawLine = '';
   HelmetData? _helmetData;
+
+  bool _isRideActive = false;
+  DateTime? _rideStartedAt;
+  DateTime? _rideEndedAt;
+
+  double? _latitude;
+  double? _longitude;
+  double? _speedKmh;
 
   static const Color _accent = Color(0xFFFC4C02);
   static const Color _bg = Color(0xFFF7F7F7);
@@ -172,11 +186,127 @@ class _DashboardPageState extends State<DashboardPage> {
     }
   }
 
-  @override
-  void dispose() {
-    _dataSubscription?.cancel();
-    _bluetoothService.dispose();
-    super.dispose();
+  Future<bool> _ensureLocationPermission() async {
+    final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      setState(() {
+        _status = 'Location services are disabled';
+      });
+      return false;
+    }
+
+    var permission = await Geolocator.checkPermission();
+
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+    }
+
+    if (permission == LocationPermission.denied) {
+      setState(() {
+        _status = 'Location permission denied';
+      });
+      return false;
+    }
+
+    if (permission == LocationPermission.deniedForever) {
+      setState(() {
+        _status = 'Location permission permanently denied';
+      });
+      return false;
+    }
+
+    return true;
+  }
+
+  Future<void> _startLocationTracking() async {
+    final allowed = await _ensureLocationPermission();
+    if (!allowed) return;
+
+    try {
+      final current = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+        ),
+      );
+
+      if (mounted) {
+        setState(() {
+          _latitude = current.latitude;
+          _longitude = current.longitude;
+          _speedKmh = (current.speed.isFinite ? current.speed : 0.0) * 3.6;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _status = 'Could not get current location';
+        });
+      }
+    }
+
+    await _positionSubscription?.cancel();
+
+    const locationSettings = LocationSettings(
+      accuracy: LocationAccuracy.high,
+      distanceFilter: 5,
+    );
+
+    _positionSubscription =
+        Geolocator.getPositionStream(locationSettings: locationSettings).listen(
+          (Position position) {
+            if (!mounted) return;
+
+            setState(() {
+              _latitude = position.latitude;
+              _longitude = position.longitude;
+              _speedKmh =
+                  (position.speed.isFinite ? position.speed : 0.0) * 3.6;
+            });
+          },
+          onError: (_) {
+            if (!mounted) return;
+            setState(() {
+              _status = 'Location stream error';
+            });
+          },
+        );
+  }
+
+  Future<void> _stopLocationTracking() async {
+    await _positionSubscription?.cancel();
+    _positionSubscription = null;
+  }
+
+  Future<void> _startRide() async {
+    setState(() {
+      _isRideActive = true;
+      _rideStartedAt = DateTime.now();
+      _rideEndedAt = null;
+      _latitude = null;
+      _longitude = null;
+      _speedKmh = null;
+    });
+
+    await _startLocationTracking();
+  }
+
+  Future<void> _endRide() async {
+    await _stopLocationTracking();
+
+    setState(() {
+      _isRideActive = false;
+      _rideEndedAt = DateTime.now();
+    });
+  }
+
+  String _formatDateTime(DateTime? dt) {
+    if (dt == null) return '--';
+    final day = dt.day.toString().padLeft(2, '0');
+    final month = dt.month.toString().padLeft(2, '0');
+    final year = dt.year.toString();
+    final hour = dt.hour.toString().padLeft(2, '0');
+    final minute = dt.minute.toString().padLeft(2, '0');
+    return '$day/$month/$year  $hour:$minute';
   }
 
   String _formatDouble(double? value, [int decimals = 1]) {
@@ -199,83 +329,12 @@ class _DashboardPageState extends State<DashboardPage> {
     return Colors.grey.shade700;
   }
 
-  Widget _sectionTitle(String title) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10, top: 4),
-      child: Align(
-        alignment: Alignment.centerLeft,
-        child: Text(
-          title,
-          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
-        ),
-      ),
-    );
-  }
-
-  Widget _metricCard({
-    required String title,
-    required String value,
-    IconData? icon,
-    Color? valueColor,
-  }) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: _card,
-        borderRadius: BorderRadius.circular(18),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (icon != null) ...[
-            Icon(icon, size: 20, color: Colors.black87),
-            const SizedBox(height: 10),
-          ],
-          Text(
-            title,
-            style: TextStyle(
-              fontSize: 13,
-              color: Colors.grey.shade700,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const Spacer(),
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: 22,
-              fontWeight: FontWeight.w800,
-              color: valueColor ?? Colors.black,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _alertChip(String label, bool active, {Color? activeColor}) {
-    final color = activeColor ?? _danger;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: active ? color.withOpacity(0.12) : Colors.grey.shade200,
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          fontWeight: FontWeight.w700,
-          color: active ? color : Colors.grey.shade700,
-        ),
-      ),
-    );
+  @override
+  void dispose() {
+    _dataSubscription?.cancel();
+    _positionSubscription?.cancel();
+    _bluetoothService.dispose();
+    super.dispose();
   }
 
   @override
@@ -289,7 +348,7 @@ class _DashboardPageState extends State<DashboardPage> {
         elevation: 0,
         scrolledUnderElevation: 0,
         title: const Text(
-          'Smart Helmet Dashboard',
+          'RideGuard Dashboard',
           style: TextStyle(fontWeight: FontWeight.w800),
         ),
         actions: [
@@ -307,164 +366,50 @@ class _DashboardPageState extends State<DashboardPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(
-                padding: const EdgeInsets.all(18),
-                decoration: BoxDecoration(
-                  color: _card,
-                  borderRadius: BorderRadius.circular(22),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.06),
-                      blurRadius: 14,
-                      offset: const Offset(0, 6),
-                    ),
-                  ],
-                ),
-                child: Column(
-                  children: [
-                    DropdownButtonFormField<String>(
-                      value: _selectedDeviceAddress,
-                      isExpanded: true,
-                      items: _pairedDevices.map((device) {
-                        final label = device.name.isNotEmpty
-                            ? '${device.name} (${device.address})'
-                            : device.address;
-                        return DropdownMenuItem<String>(
-                          value: device.address,
-                          child: Text(label, overflow: TextOverflow.ellipsis),
-                        );
-                      }).toList(),
-                      onChanged: _isConnected
-                          ? null
-                          : (value) {
-                              setState(() {
-                                _selectedDeviceAddress = value;
-                              });
-                            },
-                      decoration: const InputDecoration(
-                        labelText: 'Paired Bluetooth device',
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.all(Radius.circular(14)),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                    SizedBox(
-                      width: double.infinity,
-                      child: FilledButton(
-                        style: FilledButton.styleFrom(
-                          backgroundColor: _accent,
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                        ),
-                        onPressed:
-                            (_isConnecting || _isLoadingDevices || _isConnected)
-                            ? null
-                            : _connect,
-                        child: Text(
-                          _isConnecting ? 'Connecting...' : 'Connect to ESP32',
-                          style: const TextStyle(fontWeight: FontWeight.w700),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: OutlinedButton(
-                            onPressed: _isConnected ? _disconnect : null,
-                            style: OutlinedButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(vertical: 14),
-                            ),
-                            child: const Text('Disconnect'),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: OutlinedButton(
-                            onPressed: _isLoadingDevices
-                                ? null
-                                : _loadPairedDevices,
-                            style: OutlinedButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(vertical: 14),
-                            ),
-                            child: Text(
-                              _isLoadingDevices ? 'Loading...' : 'Refresh',
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
+              ConnectionCard(
+                pairedDevices: _pairedDevices,
+                selectedDeviceAddress: _selectedDeviceAddress,
+                isConnected: _isConnected,
+                isConnecting: _isConnecting,
+                isLoadingDevices: _isLoadingDevices,
+                onDeviceChanged: (value) {
+                  setState(() {
+                    _selectedDeviceAddress = value;
+                  });
+                },
+                onConnect: _connect,
+                onDisconnect: _disconnect,
+                onRefresh: _loadPairedDevices,
+                accentColor: _accent,
+                cardColor: _card,
               ),
-
               const SizedBox(height: 18),
-
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(18),
-                decoration: BoxDecoration(
-                  color: _card,
-                  borderRadius: BorderRadius.circular(22),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.05),
-                      blurRadius: 12,
-                      offset: const Offset(0, 5),
-                    ),
-                  ],
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      _status,
-                      style: TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.w800,
-                        color: _statusColor(),
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        _alertChip(
-                          data?.crash == true ? 'Crash detected' : 'No crash',
-                          data?.crash == true,
-                        ),
-                        _alertChip(
-                          data?.obstacleWarning == true
-                              ? 'Obstacle ahead'
-                              : 'Path clear',
-                          data?.obstacleWarning == true,
-                          activeColor: Colors.orange,
-                        ),
-                        _alertChip(
-                          data?.coAlert == true ? 'CO alert' : 'CO normal',
-                          data?.coAlert == true,
-                        ),
-                        _alertChip(
-                          data?.dontDrive == true ? 'Do not drive' : 'Drive OK',
-                          data?.dontDrive == true,
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 14),
-                    Text(
-                      'Position: ${data?.position ?? '--'}',
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ],
-                ),
+              RideSessionCard(
+                isRideActive: _isRideActive,
+                startText: _formatDateTime(_rideStartedAt),
+                endText: _formatDateTime(_rideEndedAt),
+                onStartRide: () {
+                  _startRide();
+                },
+                onEndRide: () {
+                  _endRide();
+                },
+                accentColor: _accent,
+                cardColor: _card,
               ),
-
+              const SizedBox(height: 18),
+              StatusCard(
+                statusText: _status,
+                statusColor: _statusColor(),
+                positionText: data?.position ?? '--',
+                crash: data?.crash == true,
+                obstacle: data?.obstacleWarning == true,
+                coAlert: data?.coAlert == true,
+                dontDrive: data?.dontDrive == true,
+                dangerColor: _danger,
+              ),
               const SizedBox(height: 20),
-              _sectionTitle('Health'),
+              const SectionTitle(title: 'Ride Tracking'),
               GridView.count(
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
@@ -473,31 +418,71 @@ class _DashboardPageState extends State<DashboardPage> {
                 crossAxisSpacing: 12,
                 mainAxisSpacing: 12,
                 children: [
-                  _metricCard(
+                  MetricCard(
+                    title: 'Latitude',
+                    value: _formatDouble(_latitude, 6),
+                    icon: Icons.place_outlined,
+                    cardColor: _card,
+                  ),
+                  MetricCard(
+                    title: 'Longitude',
+                    value: _formatDouble(_longitude, 6),
+                    icon: Icons.map_outlined,
+                    cardColor: _card,
+                  ),
+                  MetricCard(
+                    title: 'Speed (km/h)',
+                    value: _formatDouble(_speedKmh, 1),
+                    icon: Icons.speed_outlined,
+                    cardColor: _card,
+                  ),
+                  MetricCard(
+                    title: 'Ride Active',
+                    value: _isRideActive ? 'YES' : 'NO',
+                    icon: Icons.pedal_bike_outlined,
+                    valueColor: _isRideActive ? _accent : null,
+                    cardColor: _card,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+              const SectionTitle(title: 'Health'),
+              GridView.count(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                crossAxisCount: 2,
+                childAspectRatio: 1.35,
+                crossAxisSpacing: 12,
+                mainAxisSpacing: 12,
+                children: [
+                  MetricCard(
                     title: 'BPM',
                     value: _formatInt(data?.bpm),
                     icon: Icons.favorite_outline,
+                    cardColor: _card,
                   ),
-                  _metricCard(
+                  MetricCard(
                     title: 'Avg BPM',
                     value: _formatInt(data?.avgBpm),
                     icon: Icons.monitor_heart_outlined,
+                    cardColor: _card,
                   ),
-                  _metricCard(
+                  MetricCard(
                     title: 'SpO2',
                     value: _formatInt(data?.spo2),
                     icon: Icons.bloodtype_outlined,
+                    cardColor: _card,
                   ),
-                  _metricCard(
+                  MetricCard(
                     title: 'Force (N)',
                     value: _formatDouble(data?.force, 2),
                     icon: Icons.fitness_center_outlined,
+                    cardColor: _card,
                   ),
                 ],
               ),
-
               const SizedBox(height: 20),
-              _sectionTitle('Environment'),
+              const SectionTitle(title: 'Environment'),
               GridView.count(
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
@@ -506,37 +491,41 @@ class _DashboardPageState extends State<DashboardPage> {
                 crossAxisSpacing: 12,
                 mainAxisSpacing: 12,
                 children: [
-                  _metricCard(
+                  MetricCard(
                     title: 'Temp (°C)',
                     value: _formatDouble(data?.temperature),
                     icon: Icons.thermostat_outlined,
+                    cardColor: _card,
                   ),
-                  _metricCard(
+                  MetricCard(
                     title: 'Humidity (%)',
                     value: _formatDouble(data?.humidity),
                     icon: Icons.water_drop_outlined,
+                    cardColor: _card,
                   ),
-                  _metricCard(
+                  MetricCard(
                     title: 'Distance (cm)',
                     value: _formatDouble(data?.distance),
                     icon: Icons.social_distance_outlined,
+                    cardColor: _card,
                   ),
-                  _metricCard(
+                  MetricCard(
                     title: 'CO',
                     value: _formatInt(data?.co),
                     icon: Icons.air_outlined,
+                    cardColor: _card,
                   ),
-                  _metricCard(
+                  MetricCard(
                     title: 'Alcohol (mg/L)',
                     value: _formatDouble(data?.alcohol, 3),
                     icon: Icons.local_bar_outlined,
-                    valueColor: (data?.dontDrive == true) ? _danger : null,
+                    valueColor: data?.dontDrive == true ? _danger : null,
+                    cardColor: _card,
                   ),
                 ],
               ),
-
               const SizedBox(height: 20),
-              _sectionTitle('Motion'),
+              const SectionTitle(title: 'Motion'),
               GridView.count(
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
@@ -545,35 +534,38 @@ class _DashboardPageState extends State<DashboardPage> {
                 crossAxisSpacing: 12,
                 mainAxisSpacing: 12,
                 children: [
-                  _metricCard(
+                  MetricCard(
                     title: 'Pitch',
                     value: _formatDouble(data?.pitch),
                     icon: Icons.screen_rotation_alt_outlined,
+                    cardColor: _card,
                   ),
-                  _metricCard(
+                  MetricCard(
                     title: 'Roll',
                     value: _formatDouble(data?.roll),
                     icon: Icons.threesixty_outlined,
+                    cardColor: _card,
                   ),
-                  _metricCard(
+                  MetricCard(
                     title: 'Obstacle',
                     value: data?.obstacleWarning == true ? 'YES' : 'NO',
                     icon: Icons.warning_amber_rounded,
                     valueColor: data?.obstacleWarning == true
                         ? Colors.orange
                         : null,
+                    cardColor: _card,
                   ),
-                  _metricCard(
+                  MetricCard(
                     title: 'Crash',
                     value: data?.crash == true ? 'YES' : 'NO',
                     icon: Icons.report_problem_outlined,
                     valueColor: data?.crash == true ? _danger : null,
+                    cardColor: _card,
                   ),
                 ],
               ),
-
               const SizedBox(height: 20),
-              _sectionTitle('Debug'),
+              const SectionTitle(title: 'Debug'),
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(14),
