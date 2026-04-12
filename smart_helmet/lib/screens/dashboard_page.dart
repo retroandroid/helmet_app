@@ -7,12 +7,15 @@ import 'package:geolocator/geolocator.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/helmet_data.dart';
+import '../models/ride_stats.dart';
 import '../services/bluetooth_service.dart';
+import '../services/ride_service.dart';
 import '../widgets/connection_card.dart';
 import '../widgets/ride_session_card.dart';
 import '../widgets/status_card.dart';
 import '../widgets/metric_card.dart';
 import '../widgets/section_title.dart';
+import 'ride_archive_page.dart';
 
 class DashboardPage extends StatefulWidget {
   const DashboardPage({super.key});
@@ -23,6 +26,8 @@ class DashboardPage extends StatefulWidget {
 
 class _DashboardPageState extends State<DashboardPage> {
   final BluetoothService _bluetoothService = BluetoothService();
+  final RideService _rideService = RideService();
+  final RideStats _rideStats = RideStats();
 
   List<BluetoothDevice> _pairedDevices = [];
   String? _selectedDeviceAddress;
@@ -40,6 +45,7 @@ class _DashboardPageState extends State<DashboardPage> {
   bool _isRideActive = false;
   DateTime? _rideStartedAt;
   DateTime? _rideEndedAt;
+  int? _currentRideId;
 
   double? _latitude;
   double? _longitude;
@@ -90,7 +96,7 @@ class _DashboardPageState extends State<DashboardPage> {
       _isLoadingDevices = false;
       _status = dedupedDevices.isEmpty
           ? 'No paired Bluetooth devices found'
-          : 'Select your ESP32 device';
+          : 'Select your device';
     });
   }
 
@@ -173,11 +179,29 @@ class _DashboardPageState extends State<DashboardPage> {
 
     try {
       final Map<String, dynamic> jsonMap = jsonDecode(line);
-      final parsed = HelmetData.fromJson(jsonMap);
+      final HelmetData parsed = HelmetData.fromJson(jsonMap);
 
       setState(() {
         _helmetData = parsed;
         _status = 'Receiving live data';
+
+        if (_isRideActive) {
+          _rideStats.addSample(
+            speedKmh: _speedKmh,
+            bpm: parsed.bpm,
+            spo2: parsed.spo2,
+            co: parsed.co,
+            alcohol: parsed.alcohol,
+            temperature: parsed.temperature,
+            humidity: parsed.humidity,
+            force: parsed.force,
+            distance: parsed.distance,
+            crash: parsed.crash,
+            obstacle: parsed.obstacleWarning,
+            coAlert: parsed.coAlert,
+            dontDrive: parsed.dontDrive,
+          );
+        }
       });
     } catch (_) {
       setState(() {
@@ -234,6 +258,10 @@ class _DashboardPageState extends State<DashboardPage> {
           _latitude = current.latitude;
           _longitude = current.longitude;
           _speedKmh = (current.speed.isFinite ? current.speed : 0.0) * 3.6;
+
+          if (_isRideActive) {
+            _rideStats.addSample(speedKmh: _speedKmh);
+          }
         });
       }
     } catch (_) {
@@ -261,6 +289,10 @@ class _DashboardPageState extends State<DashboardPage> {
               _longitude = position.longitude;
               _speedKmh =
                   (position.speed.isFinite ? position.speed : 0.0) * 3.6;
+
+              if (_isRideActive) {
+                _rideStats.addSample(speedKmh: _speedKmh);
+              }
             });
           },
           onError: (_) {
@@ -278,25 +310,76 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   Future<void> _startRide() async {
+    final startedAt = DateTime.now();
+
     setState(() {
+      _rideStats.reset();
       _isRideActive = true;
-      _rideStartedAt = DateTime.now();
+      _rideStartedAt = startedAt;
       _rideEndedAt = null;
+      _currentRideId = null;
       _latitude = null;
       _longitude = null;
       _speedKmh = null;
     });
 
     await _startLocationTracking();
+
+    try {
+      final rideId = await _rideService.createRide(
+        startedAt: startedAt,
+        startLat: _latitude,
+        startLng: _longitude,
+      );
+
+      if (!mounted) return;
+
+      setState(() {
+        _currentRideId = rideId;
+      });
+    } catch (_) {
+      if (!mounted) return;
+
+      setState(() {
+        _status = 'Failed to create ride in database';
+      });
+    }
   }
 
   Future<void> _endRide() async {
     await _stopLocationTracking();
 
+    final endedAt = DateTime.now();
+    final rideId = _currentRideId;
+
     setState(() {
       _isRideActive = false;
-      _rideEndedAt = DateTime.now();
+      _rideEndedAt = endedAt;
     });
+
+    if (rideId == null) return;
+
+    try {
+      await _rideService.endRide(
+        rideId: rideId,
+        endedAt: endedAt,
+        endLat: _latitude,
+        endLng: _longitude,
+        stats: _rideStats,
+      );
+
+      if (!mounted) return;
+
+      setState(() {
+        _currentRideId = null;
+      });
+    } catch (_) {
+      if (!mounted) return;
+
+      setState(() {
+        _status = 'Failed to end ride in database';
+      });
+    }
   }
 
   String _formatDateTime(DateTime? dt) {
@@ -352,6 +435,14 @@ class _DashboardPageState extends State<DashboardPage> {
           style: TextStyle(fontWeight: FontWeight.w800),
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.history),
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const RideArchivePage()),
+              );
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.logout),
             onPressed: () async {

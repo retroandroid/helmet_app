@@ -79,7 +79,7 @@ class ConnectionCard extends StatelessWidget {
                   ? null
                   : onConnect,
               child: Text(
-                isConnecting ? 'Connecting...' : 'Connect to ESP32',
+                isConnecting ? 'Connecting...' : 'Connect to device',
                 style: const TextStyle(fontWeight: FontWeight.w700),
               ),
             ),
