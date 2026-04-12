@@ -16,6 +16,7 @@ import '../widgets/status_card.dart';
 import '../widgets/metric_card.dart';
 import '../widgets/section_title.dart';
 import 'ride_archive_page.dart';
+import 'emergency_contact_page.dart';
 
 class DashboardPage extends StatefulWidget {
   const DashboardPage({super.key});
@@ -435,6 +436,14 @@ class _DashboardPageState extends State<DashboardPage> {
           style: TextStyle(fontWeight: FontWeight.w800),
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.emergency_outlined),
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const EmergencyContactPage()),
+              );
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.history),
             onPressed: () {
