@@ -78,7 +78,9 @@ class _RideArchivePageState extends State<RideArchivePage> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
-        color: active ? Colors.red.withOpacity(0.10) : Colors.grey.shade200,
+        color: active
+            ? Colors.red.withValues(alpha: 0.10)
+            : Colors.grey.shade200,
         borderRadius: BorderRadius.circular(999),
       ),
       child: Text(
@@ -120,7 +122,7 @@ class _RideArchivePageState extends State<RideArchivePage> {
             : ListView.separated(
                 padding: const EdgeInsets.all(16),
                 itemCount: _rides.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 12),
+                separatorBuilder: (_, index) => const SizedBox(height: 12),
                 itemBuilder: (context, index) {
                   final ride = _rides[index];
 
@@ -131,7 +133,7 @@ class _RideArchivePageState extends State<RideArchivePage> {
                       borderRadius: BorderRadius.circular(18),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withOpacity(0.05),
+                          color: Colors.black.withValues(alpha: 0.05),
                           blurRadius: 10,
                           offset: const Offset(0, 4),
                         ),
