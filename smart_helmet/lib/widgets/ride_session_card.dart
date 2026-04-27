@@ -58,29 +58,46 @@ class RideSessionCard extends StatelessWidget {
             style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
           ),
           const SizedBox(height: 14),
-          Row(
-            children: [
-              Expanded(
-                child: FilledButton(
-                  onPressed: isRideActive ? null : onStartRide,
-                  style: FilledButton.styleFrom(
-                    backgroundColor: accentColor,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                  ),
-                  child: const Text('Start Ride'),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final useVerticalLayout = constraints.maxWidth < 360;
+
+              final startButton = FilledButton(
+                onPressed: isRideActive ? null : onStartRide,
+                style: FilledButton.styleFrom(
+                  backgroundColor: accentColor,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
                 ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: isRideActive ? onEndRide : null,
-                  style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                  ),
-                  child: const Text('End Ride'),
+                child: const Text('Start Ride'),
+              );
+
+              final endButton = OutlinedButton(
+                onPressed: isRideActive ? onEndRide : null,
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 14),
                 ),
-              ),
-            ],
+                child: const Text('End Ride'),
+              );
+
+              if (useVerticalLayout) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    startButton,
+                    const SizedBox(height: 10),
+                    endButton,
+                  ],
+                );
+              }
+
+              return Row(
+                children: [
+                  Expanded(child: startButton),
+                  const SizedBox(width: 10),
+                  Expanded(child: endButton),
+                ],
+              );
+            },
           ),
         ],
       ),

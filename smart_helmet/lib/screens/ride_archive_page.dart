@@ -74,6 +74,29 @@ class _RideArchivePageState extends State<RideArchivePage> {
     return value.toString();
   }
 
+  String _formatRideDuration(String? startedAtIso, String? endedAtIso) {
+    if (startedAtIso == null || startedAtIso.isEmpty) return '--';
+
+    final startedAt = DateTime.tryParse(startedAtIso)?.toLocal();
+    if (startedAt == null) return '--';
+
+    final endedAt = DateTime.tryParse(endedAtIso ?? '')?.toLocal();
+    final effectiveEnd = endedAt ?? DateTime.now();
+    final duration = effectiveEnd.difference(startedAt);
+
+    if (duration.isNegative) return '--';
+
+    final hours = duration.inHours;
+    final minutes = duration.inMinutes.remainder(60);
+    final seconds = duration.inSeconds.remainder(60);
+
+    if (hours > 0) {
+      return '${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+    }
+
+    return '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+  }
+
   Widget _buildFlag(String label, bool active) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -143,7 +166,7 @@ class _RideArchivePageState extends State<RideArchivePage> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          _formatDateTime(ride['started_at'] as String?),
+                          'Duration: ${_formatRideDuration(ride['started_at'] as String?, ride['ended_at'] as String?)}',
                           style: const TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.w800,
