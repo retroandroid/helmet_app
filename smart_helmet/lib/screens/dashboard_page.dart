@@ -99,6 +99,7 @@ class _DashboardPageState extends State<DashboardPage> {
   void initState() {
     super.initState();
     _loadPairedDevices();
+    _startLocationTracking();
   }
 
   Future<void> _loadPairedDevices() async {
@@ -281,6 +282,8 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   Future<void> _startLocationTracking() async {
+    if (_positionSubscription != null) return;
+
     final allowed = await _ensureLocationPermission();
     if (!allowed) return;
 
@@ -342,11 +345,6 @@ class _DashboardPageState extends State<DashboardPage> {
         );
   }
 
-  Future<void> _stopLocationTracking() async {
-    await _positionSubscription?.cancel();
-    _positionSubscription = null;
-  }
-
   Future<void> _startRide() async {
     final startedAt = DateTime.now();
 
@@ -356,9 +354,6 @@ class _DashboardPageState extends State<DashboardPage> {
       _rideStartedAt = startedAt;
       _rideEndedAt = null;
       _currentRideId = null;
-      _latitude = null;
-      _longitude = null;
-      _speedKmh = null;
     });
 
     await _startLocationTracking();
@@ -385,8 +380,6 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   Future<void> _endRide() async {
-    await _stopLocationTracking();
-
     final endedAt = DateTime.now();
     final rideId = _currentRideId;
 
@@ -715,10 +708,10 @@ class _DashboardPageState extends State<DashboardPage> {
               cardColor: _card,
             ),
             MetricCard(
-              title: 'Force (N)',
-              value: _formatDouble(data?.force, 2),
-              icon: Icons.fitness_center_outlined,
-              valueColor: data?.crash == true ? _danger : null,
+              title: 'CO',
+              value: _formatInt(data?.co),
+              icon: Icons.air_outlined,
+              valueColor: data?.coAlert == true ? _danger : null,
               cardColor: _card,
             ),
           ],
@@ -783,15 +776,16 @@ class _DashboardPageState extends State<DashboardPage> {
         _MetricGrid(
           children: [
             MetricCard(
-              title: 'Pitch',
-              value: _formatDouble(data?.pitch),
-              icon: Icons.screen_rotation_alt_outlined,
+              title: 'Force (N)',
+              value: _formatDouble(data?.force, 2),
+              icon: Icons.fitness_center_outlined,
+              valueColor: data?.crash == true ? _danger : null,
               cardColor: _card,
             ),
             MetricCard(
-              title: 'Roll',
-              value: _formatDouble(data?.roll),
-              icon: Icons.threesixty_outlined,
+              title: 'Position',
+              value: data?.position ?? '--',
+              icon: Icons.accessibility_new_outlined,
               cardColor: _card,
             ),
             MetricCard(
