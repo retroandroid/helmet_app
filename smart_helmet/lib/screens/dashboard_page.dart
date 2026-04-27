@@ -545,6 +545,14 @@ class _DashboardPageState extends State<DashboardPage> {
     return '${_latitude!.toStringAsFixed(5)}, ${_longitude!.toStringAsFixed(5)}';
   }
 
+  String _phonePositionCardValue() {
+    if (_latitude == null || _longitude == null) {
+      return 'Waiting for\nphone GPS';
+    }
+
+    return '${_latitude!.toStringAsFixed(5)},\n${_longitude!.toStringAsFixed(5)}';
+  }
+
   String _rideDurationText() {
     final startedAt = _rideStartedAt;
     if (startedAt == null) return '--';
@@ -689,10 +697,11 @@ class _DashboardPageState extends State<DashboardPage> {
         const SizedBox(height: 20),
         const SectionTitle(title: 'Ride Tracking'),
         _MetricGrid(
+          childAspectRatio: 1.05,
           children: [
             MetricCard(
               title: 'Position',
-              value: _phonePositionSummary(),
+              value: _phonePositionCardValue(),
               icon: Icons.assistant_navigation,
               cardColor: _card,
             ),
