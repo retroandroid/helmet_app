@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 class StatusCard extends StatelessWidget {
   final String statusText;
   final Color statusColor;
-  final String positionText;
   final bool crash;
   final bool obstacle;
   final bool coAlert;
@@ -14,7 +13,6 @@ class StatusCard extends StatelessWidget {
     super.key,
     required this.statusText,
     required this.statusColor,
-    required this.positionText,
     required this.crash,
     required this.obstacle,
     required this.coAlert,
@@ -81,11 +79,6 @@ class StatusCard extends StatelessWidget {
               _alertChip(coAlert ? 'CO alert' : 'CO normal', coAlert),
               _alertChip(dontDrive ? 'Do not drive' : 'Drive OK', dontDrive),
             ],
-          ),
-          const SizedBox(height: 14),
-          Text(
-            'Position: $positionText',
-            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
           ),
         ],
       ),

@@ -41,10 +41,12 @@ class _DashboardPageState extends State<DashboardPage> {
   String? _selectedDeviceAddress;
   StreamSubscription<String>? _dataSubscription;
   StreamSubscription<Position>? _positionSubscription;
+  Position? _lastPhonePosition;
 
   bool _isLoadingDevices = false;
   bool _isConnecting = false;
   bool _isConnected = false;
+  bool _hasShownCrashEmergencySheet = false;
 
   String _status = 'Not connected';
   String _lastRawLine = '';
@@ -242,6 +244,16 @@ class _DashboardPageState extends State<DashboardPage> {
           );
         }
       });
+
+      if (parsed.crash && !_hasShownCrashEmergencySheet) {
+        _hasShownCrashEmergencySheet = true;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          _showEmergencyDetails();
+        });
+      } else if (!parsed.crash) {
+        _hasShownCrashEmergencySheet = false;
+      }
     } catch (_) {
       setState(() {
         _status = 'Connected, waiting for valid JSON';
@@ -282,10 +294,11 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   Future<void> _startLocationTracking() async {
-    if (_positionSubscription != null) return;
-
     final allowed = await _ensureLocationPermission();
     if (!allowed) return;
+
+    await _positionSubscription?.cancel();
+    _positionSubscription = null;
 
     try {
       final current = await Geolocator.getCurrentPosition(
@@ -294,17 +307,7 @@ class _DashboardPageState extends State<DashboardPage> {
         ),
       );
 
-      if (mounted) {
-        setState(() {
-          _latitude = current.latitude;
-          _longitude = current.longitude;
-          _speedKmh = (current.speed.isFinite ? current.speed : 0.0) * 3.6;
-
-          if (_isRideActive) {
-            _rideStats.addSample(speedKmh: _speedKmh);
-          }
-        });
-      }
+      _applyPhoneLocation(current, resetPrevious: true);
     } catch (_) {
       if (mounted) {
         setState(() {
@@ -322,20 +325,7 @@ class _DashboardPageState extends State<DashboardPage> {
 
     _positionSubscription =
         Geolocator.getPositionStream(locationSettings: locationSettings).listen(
-          (position) {
-            if (!mounted) return;
-
-            setState(() {
-              _latitude = position.latitude;
-              _longitude = position.longitude;
-              _speedKmh =
-                  (position.speed.isFinite ? position.speed : 0.0) * 3.6;
-
-              if (_isRideActive) {
-                _rideStats.addSample(speedKmh: _speedKmh);
-              }
-            });
-          },
+          _applyPhoneLocation,
           onError: (_) {
             if (!mounted) return;
             setState(() {
@@ -343,6 +333,51 @@ class _DashboardPageState extends State<DashboardPage> {
             });
           },
         );
+  }
+
+  void _applyPhoneLocation(Position position, {bool resetPrevious = false}) {
+    if (!mounted) return;
+
+    final previous = resetPrevious ? null : _lastPhonePosition;
+    final calculatedSpeedKmh = _calculatePhoneSpeedKmh(
+      current: position,
+      previous: previous,
+    );
+
+    setState(() {
+      _latitude = position.latitude;
+      _longitude = position.longitude;
+      _speedKmh = calculatedSpeedKmh;
+      _lastPhonePosition = position;
+
+      if (_isRideActive) {
+        _rideStats.addSample(speedKmh: _speedKmh);
+      }
+    });
+  }
+
+  double? _calculatePhoneSpeedKmh({
+    required Position current,
+    required Position? previous,
+  }) {
+    if (current.speed.isFinite && current.speed >= 0) {
+      return current.speed * 3.6;
+    }
+
+    if (previous == null) return null;
+
+    final elapsedSeconds =
+        current.timestamp.difference(previous.timestamp).inMilliseconds / 1000;
+    if (elapsedSeconds <= 0) return null;
+
+    final distanceMeters = Geolocator.distanceBetween(
+      previous.latitude,
+      previous.longitude,
+      current.latitude,
+      current.longitude,
+    );
+
+    return (distanceMeters / elapsedSeconds) * 3.6;
   }
 
   Future<void> _startRide() async {
@@ -502,6 +537,14 @@ class _DashboardPageState extends State<DashboardPage> {
     return 'Helmet offline';
   }
 
+  String _phonePositionSummary() {
+    if (_latitude == null || _longitude == null) {
+      return 'Waiting for phone GPS';
+    }
+
+    return '${_latitude!.toStringAsFixed(5)}, ${_longitude!.toStringAsFixed(5)}';
+  }
+
   Widget _buildCurrentPage(HelmetData? data) {
     switch (_selectedTabIndex) {
       case 0:
@@ -550,7 +593,7 @@ class _DashboardPageState extends State<DashboardPage> {
           status: _status,
           isConnected: _isConnected,
           isRideActive: _isRideActive,
-          position: data?.position ?? '--',
+          phonePosition: _phonePositionSummary(),
           onEmergencyPressed: _showEmergencyDetails,
         ),
         const SizedBox(height: 20),
@@ -631,15 +674,15 @@ class _DashboardPageState extends State<DashboardPage> {
         _MetricGrid(
           children: [
             MetricCard(
-              title: 'Latitude',
-              value: _formatDouble(_latitude, 6),
-              icon: Icons.place_outlined,
+              title: 'Phone Position',
+              value: _phonePositionSummary(),
+              icon: Icons.assistant_navigation,
               cardColor: _card,
             ),
             MetricCard(
-              title: 'Longitude',
-              value: _formatDouble(_longitude, 6),
-              icon: Icons.map_outlined,
+              title: 'GPS Source',
+              value: _latitude == null ? 'Waiting' : 'Phone',
+              icon: Icons.phone_android_outlined,
               cardColor: _card,
             ),
             MetricCard(
@@ -726,7 +769,6 @@ class _DashboardPageState extends State<DashboardPage> {
         StatusCard(
           statusText: _status,
           statusColor: _statusColor(),
-          positionText: data?.position ?? '--',
           crash: data?.crash == true,
           obstacle: data?.obstacleWarning == true,
           coAlert: data?.coAlert == true,
@@ -784,7 +826,7 @@ class _DashboardPageState extends State<DashboardPage> {
             ),
             MetricCard(
               title: 'Position',
-              value: data?.position ?? '--',
+              value: _phonePositionSummary(),
               icon: Icons.accessibility_new_outlined,
               cardColor: _card,
             ),
@@ -855,11 +897,6 @@ class _DashboardPageState extends State<DashboardPage> {
           style: const TextStyle(fontWeight: FontWeight.w800),
         ),
         actions: [
-          IconButton(
-            tooltip: 'Emergency info',
-            icon: const Icon(Icons.emergency_outlined),
-            onPressed: _showEmergencyDetails,
-          ),
           IconButton(
             tooltip: 'Logout',
             icon: const Icon(Icons.logout),
@@ -976,7 +1013,7 @@ class _HeroSummaryCard extends StatelessWidget {
   final String status;
   final bool isConnected;
   final bool isRideActive;
-  final String position;
+  final String phonePosition;
   final VoidCallback onEmergencyPressed;
 
   const _HeroSummaryCard({
@@ -986,7 +1023,7 @@ class _HeroSummaryCard extends StatelessWidget {
     required this.status,
     required this.isConnected,
     required this.isRideActive,
-    required this.position,
+    required this.phonePosition,
     required this.onEmergencyPressed,
   });
 
@@ -1060,7 +1097,7 @@ class _HeroSummaryCard extends StatelessWidget {
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
-                    'Helmet position: $position',
+                    'Phone location: $phonePosition',
                     style: const TextStyle(
                       color: Colors.white,
                       fontSize: 15,
