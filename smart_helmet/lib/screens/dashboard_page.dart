@@ -545,6 +545,23 @@ class _DashboardPageState extends State<DashboardPage> {
     return '${_latitude!.toStringAsFixed(5)}, ${_longitude!.toStringAsFixed(5)}';
   }
 
+  String _rideDurationText() {
+    final startedAt = _rideStartedAt;
+    if (startedAt == null) return '--';
+
+    final end = _isRideActive ? DateTime.now() : (_rideEndedAt ?? DateTime.now());
+    final duration = end.difference(startedAt);
+    final hours = duration.inHours;
+    final minutes = duration.inMinutes.remainder(60);
+    final seconds = duration.inSeconds.remainder(60);
+
+    if (hours > 0) {
+      return '${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+    }
+
+    return '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+  }
+
   Widget _buildCurrentPage(HelmetData? data) {
     switch (_selectedTabIndex) {
       case 0:
@@ -674,15 +691,15 @@ class _DashboardPageState extends State<DashboardPage> {
         _MetricGrid(
           children: [
             MetricCard(
-              title: 'Phone Position',
+              title: 'Position',
               value: _phonePositionSummary(),
               icon: Icons.assistant_navigation,
               cardColor: _card,
             ),
             MetricCard(
-              title: 'GPS Source',
-              value: _latitude == null ? 'Waiting' : 'Phone',
-              icon: Icons.phone_android_outlined,
+              title: 'Ride Duration',
+              value: _rideDurationText(),
+              icon: Icons.timer_outlined,
               cardColor: _card,
             ),
             MetricCard(
@@ -1097,7 +1114,7 @@ class _HeroSummaryCard extends StatelessWidget {
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
-                    'Phone location: $phonePosition',
+                    'Location: $phonePosition',
                     style: const TextStyle(
                       color: Colors.white,
                       fontSize: 15,
